@@ -10,4 +10,3 @@ print(f"tokens for {text}: {tokens}")
 
 decoded_text = encoder.decode(tokens)
 print(f"decoded text for {tokens}: {decoded_text}")
-

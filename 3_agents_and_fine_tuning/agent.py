@@ -8,14 +8,16 @@ load_dotenv()
 
 client = OpenAI()
 
+
 def get_weather(city: str) -> str:
     print(f"🤖 Tool: Getting weather for {city}")
     url = f"https://wttr.in/{city}?format=%C+%t"
     response = requests.get(url)
     if response.status_code != 200:
         return "Sorry, I couldn't get the weather information for that city."
-    
+
     return f"The weather in {city} is {response.text}."
+
 
 def execute_command(command: str) -> str:
     print(f"🤖 Tool: Executing command {command}")
@@ -31,8 +33,8 @@ tools = {
             "properties": {
                 "city": {"type": "string", "description": "The name of the city"}
             },
-            "required": ["city"]
-        }
+            "required": ["city"],
+        },
     },
     "execute_command": {
         "fn": execute_command,
@@ -42,9 +44,9 @@ tools = {
             "properties": {
                 "command": {"type": "string", "description": "The command to execute"}
             },
-            "required": ["command"]
-        }
-    }
+            "required": ["command"],
+        },
+    },
 }
 
 # system prompt
@@ -93,11 +95,13 @@ while True:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             response_format={"type": "json_object"},
-            messages=messages
+            messages=messages,
         )
 
         response_json = json.loads(response.choices[0].message.content)
-        messages.append({"role": "assistant", "content": response.choices[0].message.content})
+        messages.append(
+            {"role": "assistant", "content": response.choices[0].message.content}
+        )
 
         if response_json.get("step") == "plan":
             print(f"🤖: {response_json.get('content')}")
@@ -110,14 +114,29 @@ while True:
         if response_json.get("step") == "action":
             function_name = response_json.get("function")
             if function_name not in tools:
-                messages.append({"role": "system", "content": f"👤: {function_name} is not a valid function"})
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"👤: {function_name} is not a valid function",
+                    }
+                )
                 continue
 
             tool_fn = tools[function_name]["fn"]
             tool_input = response_json.get("input")
             if tool_input is None:
-                messages.append({"role": "system", "content": f"👤: {function_name} is missing input"})
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"👤: {function_name} is missing input",
+                    }
+                )
                 continue
 
             tool_response = tool_fn(tool_input)
-            messages.append({"role": "assistant", "content": json.dumps({"step": "observe", "output": tool_response})})
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps({"step": "observe", "output": tool_response}),
+                }
+            )

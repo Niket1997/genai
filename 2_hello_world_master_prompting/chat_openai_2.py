@@ -29,7 +29,7 @@ response = client.chat.completions.create(
     messages=[
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "What is 5 * 45?"},
-    ], # zero shot prompting, as no expectations are set
+    ],  # zero shot prompting, as no expectations are set
 )
 
 print(response.choices[0].message.content)
@@ -39,7 +39,7 @@ response = client.chat.completions.create(
     messages=[
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "What is a mobile phone?"},
-    ], # zero shot prompting, as no expectations are set
+    ],  # zero shot prompting, as no expectations are set
 )
 
 print(response.choices[0].message.content)

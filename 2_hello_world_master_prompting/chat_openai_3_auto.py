@@ -47,9 +47,7 @@ messages.append({"role": "user", "content": query})
 
 while True:
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=messages
+        model="gpt-4o-mini", response_format={"type": "json_object"}, messages=messages
     )
 
     response_json = json.loads(response.choices[0].message.content)
@@ -59,5 +57,6 @@ while True:
         break
 
     print(f"🤖: {response_json.get('content')}")
-    messages.append({"role": "assistant", "content": response.choices[0].message.content})
-    
+    messages.append(
+        {"role": "assistant", "content": response.choices[0].message.content}
+    )

@@ -44,12 +44,52 @@ response = client.chat.completions.create(
     messages=[
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "What is 3 + 4 * 5?"},
-        {"role": "assistant", "content": json.dumps({ "step": "analyse", "content": "The user is asking a mathematics question involving both addition and multiplication, which requires understanding the order of operations." })},
-        {"role": "assistant", "content": json.dumps({"step": "think", "content": "To solve the expression 3 + 4 * 5, I need to follow the order of operations (PEMDAS/BODMAS): first evaluating the multiplication before the addition."})},
-        {"role": "assistant", "content": json.dumps({"step": "output", "content": "First, I will calculate 4 * 5, which equals 20. Then, I will add 3 to that result."})},
-        {"role": "assistant", "content": json.dumps({"step": "validate", "content": "The result of 3 + 20, where 20 comes from the multiplication, needs to be calculated to confirm accuracy."})},
-        {"role": "assistant", "content": json.dumps({"step": "result", "content": "3 + 4 * 5 = 3 + 20 = 23, which follows the correct order of operations."})}
-    ]
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "step": "analyse",
+                    "content": "The user is asking a mathematics question involving both addition and multiplication, which requires understanding the order of operations.",
+                }
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "step": "think",
+                    "content": "To solve the expression 3 + 4 * 5, I need to follow the order of operations (PEMDAS/BODMAS): first evaluating the multiplication before the addition.",
+                }
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "step": "output",
+                    "content": "First, I will calculate 4 * 5, which equals 20. Then, I will add 3 to that result.",
+                }
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "step": "validate",
+                    "content": "The result of 3 + 20, where 20 comes from the multiplication, needs to be calculated to confirm accuracy.",
+                }
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": json.dumps(
+                {
+                    "step": "result",
+                    "content": "3 + 4 * 5 = 3 + 20 = 23, which follows the correct order of operations.",
+                }
+            ),
+        },
+    ],
 )
 
 print(response.choices[0].message.content)

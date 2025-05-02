@@ -17,42 +17,36 @@ config = {
     "version": "v1.1",
     "vector_store": {
         "provider": "qdrant",
-        "config": {
-            "host": QDRANT_HOST,
-            "port": QDRANT_PORT
-        }
+        "config": {"host": QDRANT_HOST, "port": QDRANT_PORT},
     },
     "llm": {
         "provider": "openai",
-        "config": {
-            "api_key": OPENAI_API_KEY,
-            "model": "gpt-4.1"
-        }
+        "config": {"api_key": OPENAI_API_KEY, "model": "gpt-4.1"},
     },
     "embedder": {
         "provider": "openai",
-        "config": {
-            "api_key": OPENAI_API_KEY,
-            "model": "text-embedding-3-small"
-        }
+        "config": {"api_key": OPENAI_API_KEY, "model": "text-embedding-3-small"},
     },
     "graph_store": {
         "provider": "neo4j",
         "config": {
             "url": NEO4J_URL,
             "username": NEO4J_USERNAME,
-            "password": NEO4J_PASSWORD
-        }
-    }
+            "password": NEO4J_PASSWORD,
+        },
+    },
 }
 
 memory = Memory.from_config(config)
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
+
 def chat(message):
     related_memories = memory.search(query=message, user_id="userId123")
-    related_memories_str = "\n".join([memory["memory"] for memory in related_memories.get("results")])
+    related_memories_str = "\n".join(
+        [memory["memory"] for memory in related_memories.get("results")]
+    )
 
     system_prompt = f"""
     You are a memory-aware fact extraction agent, an advanced AI designed to 
@@ -67,7 +61,7 @@ def chat(message):
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": message}
+        {"role": "user", "content": message},
     ]
 
     response = openai_client.chat.completions.create(
