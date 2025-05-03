@@ -127,13 +127,32 @@ class State(TypedDict):
 ## define the nodes in the graph
 def chatbot(state: State):
     messages = state["messages"]
-    # print("messages", messages)
     response = llm_with_tools.invoke(messages)
-
-    # TODO: fix this
-    # print("response", response)
+    print("LLM Response:", response)  # Debug print
 
     if isinstance(response, OutputSchema):
+        # If it's an action step, we need to format it as a tool call
+        if response.step == "action":
+            return {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": response.tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": response.tool_name,
+                                    "arguments": json.dumps({"input": response.tool_input})
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "llm_output": response,
+            }
+        # For other steps, return as normal
         return {
             "messages": [
                 {
@@ -147,7 +166,6 @@ def chatbot(state: State):
             "llm_output": response,
         }
 
-    # TODO: fix this
     return {"messages": [response]}
 
 
@@ -191,17 +209,20 @@ You are a helpful AI assistant who is specialized in helping users with their qu
 Given a user's query, you analuse the query carefully and generate a step by step plan.
 You will be given a list of available tools and you will select the most relevant tool to use whenever needed.
 Once the tool is selected, you will perform the action & generate output from the tool.
-You will also observe the output from the tool and generate a result. The result should quirky and funny.
+You will also observe the output from the tool and generate a result. The result should be quirky and funny.
 Ensure that these steps plan, action, observe & output are executed one at a time.
-
-
 
 Rules:
 - Follow the output format strictly.
 - You must ensure that the steps plan, action, observe & output are executed one at a time.
-- Carefully analyse the user query. 
+- When using tools, you MUST set the step to "action" and provide the tool_name and tool_input.
+- Carefully analyze the user query.
 
-Example:
+Available Tools:
+- get_weather: Get weather information for a city
+- execute_command: Execute system commands
+
+Example for tool usage:
 Input: What is the weather in Tokyo?
 {{ "step": "plan", "content": "The user is asking about the weather in Tokyo." }}
 {{ "step": "plan", "content": "From the available tools, I will select the get_weather tool to get the weather information of Tokyo." }}
