@@ -38,7 +38,7 @@ class OutputSchema(BaseModel):
 
 def generate_tool_response(
     response: str, tool_name: str, tool_input: str, tool_call_id: str
-) -> OutputSchema:
+) -> Dict[str, Any]:
     return {
         "messages": [
             {
@@ -115,8 +115,7 @@ tools = [get_weather, execute_command]
 
 # initialize the llm & bind the tools
 llm = init_chat_model(model_provider="openai", model="gpt-4.1")
-llm_with_tools = llm.bind_tools(tools)
-llm_with_tools = llm.with_structured_output(OutputSchema)
+llm_with_tools = llm.bind_tools(tools).with_structured_output(OutputSchema)
 
 
 # create graph state
