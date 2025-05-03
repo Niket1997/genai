@@ -30,10 +30,7 @@ class CommandInput(BaseModel):
 
 ### create the tools
 @traceable
-@tool(
-    description="Get the current weather information for a specified city",
-    args_schema=WeatherInput,
-)
+@tool
 def get_weather(city: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> dict:
     print(f"🤖 Tool: Getting weather for {city}")
     url = f"https://wttr.in/{city}?format=%C+%t"
@@ -58,10 +55,7 @@ def get_weather(city: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> 
 
 
 @traceable
-@tool(
-    description="Execute a system command and return its output",
-    args_schema=CommandInput,
-)
+@tool
 def execute_command(
     command: str, tool_call_id: Annotated[str, InjectedToolCallId]
 ) -> dict:
