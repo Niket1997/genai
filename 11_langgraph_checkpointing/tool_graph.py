@@ -31,7 +31,7 @@ class OutputSchema(BaseModel):
     tool_input: Optional[str] = Field(
         default=None, description="The input of the function if the step is action"
     )
-    tool_call_id: Optional[str] = Field(
+    tool_call_id: Optional[Annotated[str, InjectedToolCallId]] = Field(
         default=None, description="The id of the tool call"
     )
 
@@ -41,13 +41,7 @@ def generate_tool_response(
 ) -> Dict[str, Any]:
     return {
         "messages": [
-            {
-                "role": "tool",
-                "content": response,
-                "tool_name": tool_name,
-                "tool_input": tool_input,
-                "tool_call_id": tool_call_id,
-            }
+            AIMessage(content=response, name=tool_name, tool_call_id=tool_call_id)
         ],
         "llm_output": OutputSchema(
             step="observe",
@@ -128,41 +122,10 @@ class State(TypedDict):
 def chatbot(state: State):
     messages = state["messages"]
     response = llm_with_tools.invoke(messages)
-    print("LLM Response:", response)  # Debug print
 
     if isinstance(response, OutputSchema):
-        # If it's an action step, we need to format it as a tool call
-        if response.step == "action":
-            return {
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": [
-                            {
-                                "id": response.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": response.tool_name,
-                                    "arguments": json.dumps({"input": response.tool_input})
-                                }
-                            }
-                        ]
-                    }
-                ],
-                "llm_output": response,
-            }
-        # For other steps, return as normal
         return {
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": response.content,
-                    "tool_name": response.tool_name,
-                    "tool_input": response.tool_input,
-                    "tool_call_id": response.tool_call_id,
-                }
-            ],
+            "messages": [AIMessage(content=response.content)],
             "llm_output": response,
         }
 
@@ -184,13 +147,33 @@ def determine_flow(state: Dict[str, Any]) -> str:
     return END
 
 
-tool_node = ToolNode(tools)
+def handle_tool_call(state: State):
+    llm_output = state["llm_output"]
+    if not llm_output or llm_output.step != "action":
+        return state
+
+    tool_name = llm_output.tool_name
+    tool_input = llm_output.tool_input
+    tool_call_id = llm_output.tool_call_id
+    for tool in tools:
+        if tool.name == tool_name:
+            # Let the tool handle the tool_call_id generation
+            tool_call = tool.invoke({"city": tool_input, "tool_call_id": tool_call_id})
+            return {
+                "messages": [tool_call["messages"][0]],
+                "llm_output": tool_call,
+            }
+
+    return state
+
+
+# tool_node = ToolNode(tools)
 
 ## define the graph
 graph = StateGraph(State)
 
 graph.add_node("chatbot", chatbot)
-graph.add_node("tools", tool_node)
+graph.add_node("tools", handle_tool_call)
 
 # define the edges
 graph.add_edge(START, "chatbot")
@@ -216,6 +199,7 @@ Rules:
 - Follow the output format strictly.
 - You must ensure that the steps plan, action, observe & output are executed one at a time.
 - When using tools, you MUST set the step to "action" and provide the tool_name and tool_input.
+- You must ensure that you are generating a unique tool_call_id for each tool call.
 - Carefully analyze the user query.
 
 Available Tools:
@@ -226,21 +210,21 @@ Example for tool usage:
 Input: What is the weather in Tokyo?
 {{ "step": "plan", "content": "The user is asking about the weather in Tokyo." }}
 {{ "step": "plan", "content": "From the available tools, I will select the get_weather tool to get the weather information of Tokyo." }}
-{{ "step": "action", "function": "get_weather", "input": "Tokyo" }}
-{{ "step": "observe", "output": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius." }}
+{{ "step": "action", "tool_name": "get_weather", "tool_input": "Tokyo", "tool_call_id": "1234567890" }}
+{{ "step": "observe", "content": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius." }}
 {{ "step": "output", "content": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius. You can go out and enjoy the weather." }}
 
 Example:
 Input: write a python file in current directory to add two numbers
 {{ "step": "plan", "content": "The user is asking to create a python file to add two numbers." }}
 {{ "step": "plan", "content": "I first need to get the current directory." }}
-{{ "step": "action", "function": "execute_command", "input": "pwd" }}
-{{ "step": "observe", "output": "The current directory is /Users/aniket.mahangare/myProjects" }}
+{{ "step": "action", "tool_name": "execute_command", "tool_input": "pwd", "tool_call_id": "34567890" }}
+{{ "step": "observe", "content": "The current directory is /Users/aniket.mahangare/myProjects" }}
 {{ "step": "plan", "content": "From the available tools, I will select the execute_command tool to create a python file." }}
-{{ "step": "action", "function": "execute_command", "input": "touch /Users/aniket.mahangare/myProjects/add_numbers.py" }}
-{{ "step": "observe", "output": "The python file add_numbers.py has been created in the current directory." }}
-{{ "step": "action", "function": "execute_command", "input": "echo 'print(1+1)' > /Users/aniket.mahangare/myProjects/add_numbers.py" }}
-{{ "step": "observe", "output": "The code to add two numbers has been written in the python file add_numbers.py" }}
+{{ "step": "action", "tool_name": "execute_command", "tool_input": "touch /Users/aniket.mahangare/myProjects/add_numbers.py", "tool_call_id": "4567890" }}
+{{ "step": "observe", "content": "The python file add_numbers.py has been created in the current directory." }}
+{{ "step": "action", "tool_name": "execute_command", "tool_input": "echo 'print(1+1)' > /Users/aniket.mahangare/myProjects/add_numbers.py", "tool_call_id": "567890" }}
+{{ "step": "observe", "content": "The code to add two numbers has been written in the python file add_numbers.py" }}
 {{ "step": "output", "content": "The python file add_numbers.py has been created in the current directory. You can now add two numbers." }}
 """
 
@@ -261,17 +245,16 @@ while True:
     step = "start"
 
     for event in compiled_graph.stream({"messages": messages, "llm_output": None}):
-        if "chatbot" in event and "messages" in event["chatbot"]:
-            messages = event["chatbot"]["messages"]
-            if messages and len(messages) > 0:
-                last_message = messages[-1]
+        if "chatbot" in event and "llm_output" in event["chatbot"]:
+            llm_output = event["chatbot"]["llm_output"]
+            if llm_output:
                 try:
-                    if last_message.get("step", "") == "output":
-                        print(f"🤖: {last_message.get('content', '')}")
-                    elif last_message.get("step", "") in ["action", "observe"]:
+                    if llm_output.step == "output":
+                        print(f"🤖: {llm_output.content}")
+                    elif llm_output.step in ["action", "observe"]:
                         continue
                     else:
-                        print(f"🌀 {last_message.get('content', '')}")
+                        print(f"🌀 {llm_output.content}")
                 except Exception as e:
                     print("error", e)
                     step = "invalid step"
