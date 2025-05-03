@@ -1,7 +1,7 @@
-from mem0 import Memory
-from dotenv import load_dotenv
 import os
 
+from dotenv import load_dotenv
+from mem0 import Memory
 from openai import OpenAI
 
 load_dotenv()
