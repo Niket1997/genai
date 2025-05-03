@@ -155,10 +155,14 @@ def handle_tool_call(state: State):
     tool_name = llm_output.tool_name
     tool_input = llm_output.tool_input
     tool_call_id = llm_output.tool_call_id
+
     for tool in tools:
         if tool.name == tool_name:
-            # Let the tool handle the tool_call_id generation
-            tool_call = tool.invoke({"city": tool_input, "tool_call_id": tool_call_id})
+            # Use the correct parameter name based on the tool
+            param_name = "city" if tool_name == "get_weather" else "command"
+            tool_call = tool.invoke(
+                {param_name: tool_input, "tool_call_id": tool_call_id}
+            )
             return {
                 "messages": [tool_call["messages"][0]],
                 "llm_output": tool_call,
