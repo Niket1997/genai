@@ -1,129 +1,171 @@
-import os
-from typing import Annotated, List, Dict, Any, Optional
 import json
+import os
+from typing import Annotated, Any, Dict, List, Optional
+
 import requests
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.graph import END, START, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+from langsmith import traceable
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
-from langchain_core.tools import tool
-from langsmith import traceable
-from langgraph.graph.message import add_messages
-
 
 # load the environment variables
 load_dotenv()
 
 
-## define the input schema for the tools
-# weather input
-class WeatherInput(BaseModel):
-    city: str = Field(description="The name of the city to get weather information for")
+# Output Schema
+class OutputSchema(BaseModel):
+    step: str = Field(
+        description="The current step in the process (plan, action, observe, output)"
+    )
+    role: str = Field(description="The role of the message (user, assistant, tool)")
+    content: str = Field(description="The content of the message")
+    tool_name: Optional[str] = Field(
+        default=None, description="The name of the function if the step is action"
+    )
+    tool_input: Optional[str] = Field(
+        default=None, description="The input of the function if the step is action"
+    )
+    tool_call_id: Optional[str] = Field(
+        default=None, description="The id of the tool call"
+    )
 
 
-# command input
-class CommandInput(BaseModel):
-    command: str = Field(description="The system command to execute")
+def generate_tool_response(
+    response: str, tool_name: str, tool_input: str, tool_call_id: str
+) -> OutputSchema:
+    return {
+        "messages": [
+            {
+                "role": "tool",
+                "content": response,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "tool_call_id": tool_call_id,
+            }
+        ],
+        "llm_output": OutputSchema(
+            step="observe",
+            role="tool",
+            content=response,
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_call_id=tool_call_id,
+        ),
+    }
 
 
 ### create the tools
 @tool
 @traceable
-def get_weather(city: str) -> str:
+def get_weather(city: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> str:
     """Get the current weather information for a specified city.
-    
+
     Args:
         city: The name of the city to get weather information for
+        tool_call_id: The id of the tool call
     """
-    print(f"🤖 Tool: Getting weather for {city}")
+    print(f"🧰 Tool: Getting weather for {city}")
     url = f"https://wttr.in/{city}?format=%C+%t"
     response = requests.get(url)
     if response.status_code != 200:
-        return "Sorry, I couldn't get the weather information for that city."
-    return f"The weather in {city} is {response.text}."
+        return generate_tool_response(
+            response="Sorry, I couldn't get the weather information for that city.",
+            tool_name="get_weather",
+            tool_input=city,
+            tool_call_id=tool_call_id,
+        )
+    return generate_tool_response(
+        response=f"The weather in {city} is {response.text}.",
+        tool_name="get_weather",
+        tool_input=city,
+        tool_call_id=tool_call_id,
+    )
 
 
 @tool
 @traceable
-def execute_command(command: str) -> str:
-    """Execute a system command and return its output.
-    
+def execute_command(
+    command: str, tool_call_id: Annotated[str, InjectedToolCallId]
+) -> str:
+    """Execute a system command and return its output. The command should be a valid system command.
+    For example, you want to create a file, you can use the command "touch file.txt" to create a file named file.txt.
+
     Args:
         command: The system command to execute
+        tool_call_id: The id of the tool call
     """
-    print(f"🤖 Tool: Executing command {command}")
+    print(f"🧰 Tool: Executing command {command}")
     response = os.system(command)
-    return f"The command {command} returned {response}."
+    return generate_tool_response(
+        response=f"The command {command} returned {response}.",
+        tool_name="execute_command",
+        tool_input=command,
+        tool_call_id=tool_call_id,
+    )
+
 
 tools = [get_weather, execute_command]
 
 
 # initialize the llm & bind the tools
 llm = init_chat_model(model_provider="openai", model="gpt-4.1")
-llm.bind_tools(tools)
+llm_with_tools = llm.bind_tools(tools)
+llm_with_tools = llm.with_structured_output(OutputSchema)
 
 
 # create graph state
 class State(TypedDict):
     messages: Annotated[List, add_messages]
-    
+    llm_output: Optional[OutputSchema] = None
 
 
 ## define the nodes in the graph
 def chatbot(state: State):
-    return {"messages": [llm.invoke(state["messages"])]}
+    messages = state["messages"]
+    # print("messages", messages)
+    response = llm_with_tools.invoke(messages)
+
+    # TODO: fix this
+    # print("response", response)
+
+    if isinstance(response, OutputSchema):
+        return {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": response.content,
+                    "tool_name": response.tool_name,
+                    "tool_input": response.tool_input,
+                    "tool_call_id": response.tool_call_id,
+                }
+            ],
+            "llm_output": response,
+        }
+
+    # TODO: fix this
+    return {"messages": [response]}
+
 
 def determine_flow(state: Dict[str, Any]) -> str:
-    """Determine the next node in the flow based on the current state.
-    
-    Args:
-        state: The current state of the graph
-        
-    Returns:
-        str: The name of the next node to execute
-    """
-    messages = state['messages']
-    if not messages or len(messages) == 0 or messages[-1].content is None:
+    """Determine the next node in the flow based on the current state."""
+    llm_output = state["llm_output"]
+    if not llm_output or llm_output.step == "output":
         return END
 
-    content = messages[-1].content
+    if llm_output.step == "action":
+        return "tools"
 
-    # Handle both string and dictionary content
-    if isinstance(content, dict):
-        step = content.get("step")
-    else:
-        # If content is a string, try to parse it as JSON
-        try:
-            step = extract_field(content, "step")
-        except (json.JSONDecodeError, AttributeError):
-            # If it's not valid JSON, treat it as a regular message
-            return END
+    if llm_output.step in ["plan", "observe"]:
+        return "chatbot"
 
-    # If we have an output step, end the flow
-    if step == 'output':
-        return END
-    
-    # If we have a plan continue with chatbot
-    if step in ['plan']:
-        return 'chatbot'
-                
-    # If we have an action step, go to tools
-    if step == 'action':
-        function = extract_field(content, "function")
-        input = extract_field(content, "input")
-        print(f"🧰 executing {function} tool with input {input}")
-        return 'chatbot'
-    
-    if step == 'observe':
-        output = extract_field(content, "output")
-        print(f"🌀 observing output - {output}")
-        return 'chatbot'
-                
-            
     return END
+
 
 tool_node = ToolNode(tools)
 
@@ -135,11 +177,10 @@ graph.add_node("tools", tool_node)
 
 # define the edges
 graph.add_edge(START, "chatbot")
-graph.add_conditional_edges("chatbot", determine_flow, {
-    "tools": "tools",
-    "chatbot": "chatbot",
-    END: END
-})
+graph.add_conditional_edges(
+    "chatbot", determine_flow, {"tools": "tools", "chatbot": "chatbot", END: END}
+)
+
 graph.add_edge("tools", "chatbot")
 
 compiled_graph = graph.compile()
@@ -152,54 +193,65 @@ Given a user's query, you analuse the query carefully and generate a step by ste
 You will be given a list of available tools and you will select the most relevant tool to use whenever needed.
 Once the tool is selected, you will perform the action & generate output from the tool.
 You will also observe the output from the tool and generate a result. The result should quirky and funny.
+Ensure that these steps plan, action, observe & output are executed one at a time.
 
 
 
 Rules:
 - Follow the output format strictly.
-- Always perform one step at a time & wait for next input.
+- You must ensure that the steps plan, action, observe & output are executed one at a time.
 - Carefully analyse the user query. 
 
 Example:
 Input: What is the weather in Tokyo?
-Output: {{ "step": "plan", "content": "The user is asking about the weather in Tokyo." }}
-Output: {{ "step": "plan", "content": "From the available tools, I will select the get_weather tool to get the weather information of Tokyo." }}
-Output: {{ "step": "action", "function": "get_weather", "input": "Tokyo" }}
-Output: {{ "step": "observe", "output": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius." }}
-Output: {{ "step": "output", "content": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius. You can go out and enjoy the weather." }}
+{{ "step": "plan", "content": "The user is asking about the weather in Tokyo." }}
+{{ "step": "plan", "content": "From the available tools, I will select the get_weather tool to get the weather information of Tokyo." }}
+{{ "step": "action", "function": "get_weather", "input": "Tokyo" }}
+{{ "step": "observe", "output": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius." }}
+{{ "step": "output", "content": "The weather in Tokyo is sunny with a temperature of 12 degrees Celsius. You can go out and enjoy the weather." }}
+
+Example:
+Input: write a python file in current directory to add two numbers
+{{ "step": "plan", "content": "The user is asking to create a python file to add two numbers." }}
+{{ "step": "plan", "content": "I first need to get the current directory." }}
+{{ "step": "action", "function": "execute_command", "input": "pwd" }}
+{{ "step": "observe", "output": "The current directory is /Users/aniket.mahangare/myProjects" }}
+{{ "step": "plan", "content": "From the available tools, I will select the execute_command tool to create a python file." }}
+{{ "step": "action", "function": "execute_command", "input": "touch /Users/aniket.mahangare/myProjects/add_numbers.py" }}
+{{ "step": "observe", "output": "The python file add_numbers.py has been created in the current directory." }}
+{{ "step": "action", "function": "execute_command", "input": "echo 'print(1+1)' > /Users/aniket.mahangare/myProjects/add_numbers.py" }}
+{{ "step": "observe", "output": "The code to add two numbers has been written in the python file add_numbers.py" }}
+{{ "step": "output", "content": "The python file add_numbers.py has been created in the current directory. You can now add two numbers." }}
 """
+
 
 # extract the field from the message content
 def extract_field(content: str, field: str) -> str:
     content_dict = json.loads(content)
     return content_dict.get(field, "")
 
+
 while True:
     query = input("> ")
     messages = [
-        {
-            "role": "system",
-            "content": system_prompt,
-        },
-        {
-            "role": "user",
-            "content": query,
-        },
+        {"role": "user", "content": query},
+        {"role": "system", "content": system_prompt},
     ]
 
     step = "start"
 
-    for event in compiled_graph.stream({"messages": messages}):
-        if 'chatbot' in event and 'messages' in event['chatbot']:
-            messages = event['chatbot']['messages']
-            if messages and messages[-1].content:
-                content = messages[-1].content
-                step = extract_field(content, "step")
-                content_text = extract_field(content, "content")
-                if step == "output":
-                    print(f"🤖: {content_text}")
-                elif step == "action" or step == "observe":
-                    continue
-                else:
-                    print(f"🌀 {content_text}")
-
+    for event in compiled_graph.stream({"messages": messages, "llm_output": None}):
+        if "chatbot" in event and "messages" in event["chatbot"]:
+            messages = event["chatbot"]["messages"]
+            if messages and len(messages) > 0:
+                last_message = messages[-1]
+                try:
+                    if last_message.get("step", "") == "output":
+                        print(f"🤖: {last_message.get('content', '')}")
+                    elif last_message.get("step", "") in ["action", "observe"]:
+                        continue
+                    else:
+                        print(f"🌀 {last_message.get('content', '')}")
+                except Exception as e:
+                    print("error", e)
+                    step = "invalid step"
