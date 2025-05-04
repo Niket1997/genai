@@ -18,3 +18,4 @@ env/
 
 # Logs
 *.log
+11_langgraph_checkpointing/mongo-data/
